@@ -7,8 +7,7 @@ include(CTest)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Matplot++ plotting library
-find_package(Matplot++ REQUIRED)
+option(QUANT_BUILD_VISUALIZATION "Build the quant executable with Matplot++ visualization" ON)
 
 # Core library: GBM simulation, option payoffs, Monte Carlo pricing
 add_library(quant_core STATIC
@@ -24,17 +23,19 @@ target_include_directories(quant_core PUBLIC
 
 target_compile_features(quant_core PUBLIC cxx_std_17)
 
-# Main executable
-add_executable(quant
-    src/main.cpp
-    src/visualization.cpp
-)
+if(QUANT_BUILD_VISUALIZATION)
+    find_package(Matplot++ REQUIRED)
 
-# Link libraries
-target_link_libraries(quant PRIVATE
-    quant_core
-    Matplot++::matplot
-)
+    add_executable(quant
+        src/main.cpp
+        src/visualization.cpp
+    )
+
+    target_link_libraries(quant PRIVATE
+        quant_core
+        Matplot++::matplot
+    )
+endif()
 
 if(BUILD_TESTING)
     add_executable(test_pricing tests/test_pricing.cpp)
