@@ -51,6 +51,13 @@ if(BUILD_TESTING)
         monte_carlo_zero_volatility
         monte_carlo_one_step
         invalid_inputs
+        statistics_raw
+        statistics_split_merge
+        statistics_unequal_batches
+        statistics_empty_singleton
+        statistics_discounting
+        single_threaded_regression
+        statistics_count_overflow
     )
         add_test(NAME ${test_case} COMMAND test_pricing ${test_case})
         set_tests_properties(${test_case} PROPERTIES TIMEOUT 30)

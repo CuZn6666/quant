@@ -2,6 +2,7 @@
 #include "payoff.hpp"
 #include "pricing.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -9,6 +10,8 @@
 #include <exception>
 #include <initializer_list>
 #include <iostream>
+#include <limits>
+#include <numeric>
 #include <random>
 #include <sstream>
 #include <stdexcept>
@@ -244,6 +247,222 @@ void test_invalid_inputs()
     }, "Monte Carlo propagates invalid GBM steps");
 }
 
+std::array<double, 8> statistics_values(const MonteCarloStatistics& statistics)
+{
+    return {statistics.asian_call.sum, statistics.asian_put.sum,
+            statistics.lookback_call.sum, statistics.lookback_put.sum,
+            statistics.asian_call.sum_sq, statistics.asian_put.sum_sq,
+            statistics.lookback_call.sum_sq, statistics.lookback_put.sum_sq};
+}
+
+std::array<double, 8> price_values(const OptionPrices& prices)
+{
+    return {prices.asian_call, prices.asian_put, prices.lookback_call, prices.lookback_put,
+            prices.asian_call_std_error, prices.asian_put_std_error,
+            prices.lookback_call_std_error, prices.lookback_put_std_error};
+}
+
+void require_values_close(const std::array<double, 8>& actual,
+                          const std::array<double, 8>& expected,
+                          double tolerance, const std::string& message)
+{
+    for (std::size_t index = 0; index < actual.size(); ++index) {
+        require_close(actual[index], expected[index],
+                      tolerance * std::max(1.0, std::fabs(expected[index])),
+                      message + " field " + std::to_string(index));
+    }
+}
+
+void require_statistics_close(const MonteCarloStatistics& actual,
+                              const MonteCarloStatistics& expected,
+                              double tolerance, const std::string& message)
+{
+    require(actual.n == expected.n, message + " sample count");
+    require_values_close(statistics_values(actual), statistics_values(expected),
+                         tolerance, message);
+}
+
+void test_statistics_raw()
+{
+    std::mt19937_64 rng(2023);
+    const auto rising = accumulate_monte_carlo(100.0, 0.0, std::log(4.0), 1.0,
+                                              250.0, 2, 3, rng);
+    const MonteCarloStatistics expected_rising{
+        3, {150.0, 7500.0}, {0.0, 0.0}, {450.0, 67500.0}, {450.0, 67500.0}
+    };
+    require_statistics_close(rising, expected_rising, 1e-12,
+                             "Raw statistics for paths {100, 200, 400}");
+
+    const auto falling = accumulate_monte_carlo(100.0, 0.0, -std::log(4.0), 1.0,
+                                               60.0, 2, 3, rng);
+    const MonteCarloStatistics expected_falling{
+        3, {0.0, 0.0}, {67.5, 1518.75}, {120.0, 4800.0}, {105.0, 3675.0}
+    };
+    require_statistics_close(falling, expected_falling, 1e-12,
+                             "Raw statistics for paths {100, 50, 25}");
+}
+
+void test_statistics_split_merge()
+{
+    std::mt19937_64 whole_rng(2023);
+    std::mt19937_64 split_rng(2023);
+    const auto whole = accumulate_monte_carlo(100.0, 0.2, 0.05, 1.0, 100.0,
+                                             17, 97, whole_rng);
+    const auto first = accumulate_monte_carlo(100.0, 0.2, 0.05, 1.0, 100.0,
+                                             17, 30, split_rng);
+    const auto second = accumulate_monte_carlo(100.0, 0.2, 0.05, 1.0, 100.0,
+                                              17, 67, split_rng);
+    const auto merged = merge_statistics(first, second);
+    require_statistics_close(merged, whole, 1e-12, "Split and merged raw statistics");
+    require(whole_rng == split_rng, "Splitting preserves RNG consumption");
+    require_values_close(price_values(finalize_monte_carlo(merged, 0.05, 1.0)),
+                         price_values(finalize_monte_carlo(whole, 0.05, 1.0)),
+                         1e-10, "Split and merged prices and standard errors");
+}
+
+void test_statistics_unequal_batches()
+{
+    const MonteCarloStatistics first{
+        1, {10.0, 100.0}, {0.0, 0.0}, {40.0, 1600.0}, {20.0, 400.0}
+    };
+    const MonteCarloStatistics second{
+        3, {0.0, 0.0}, {30.0, 300.0}, {60.0, 1200.0}, {120.0, 4800.0}
+    };
+    const auto first_before = first;
+    const auto second_before = second;
+    const auto merged = merge_statistics(first, second);
+    const MonteCarloStatistics expected{
+        4, {10.0, 100.0}, {30.0, 300.0}, {100.0, 2800.0}, {140.0, 5200.0}
+    };
+    require_statistics_close(merged, expected, 0.0, "Unequal batch counts and moments");
+    require_statistics_close(merge_statistics(second, first), expected, 0.0,
+                             "Reversed merge");
+    require_statistics_close(first, first_before, 0.0, "Merge preserves first input");
+    require_statistics_close(second, second_before, 0.0, "Merge preserves second input");
+    require_values_close(price_values(finalize_monte_carlo(merged, 0.0, 1.0)),
+                         {2.5, 7.5, 25.0, 35.0, 2.5, 2.5, 5.0, 5.0}, 1e-12,
+                         "Weighted means and pooled sample variances");
+}
+
+void test_statistics_empty_singleton()
+{
+    std::mt19937_64 rng(2023);
+    const auto initial_rng = rng;
+    const auto empty = accumulate_monte_carlo(120.0, 0.0, 0.0, 1.0, 100.0, 8, 0, rng);
+    const MonteCarloStatistics default_statistics;
+    require_statistics_close(empty, default_statistics, 0.0, "Empty batch is all zero");
+    require(rng == initial_rng, "Empty batch does not consume RNG");
+
+    const auto singleton = accumulate_monte_carlo(120.0, 0.0, 0.0, 1.0, 100.0, 8, 1, rng);
+    const MonteCarloStatistics expected_singleton{
+        1, {20.0, 400.0}, {0.0, 0.0}, {20.0, 400.0}, {0.0, 0.0}
+    };
+    require_statistics_close(singleton, expected_singleton, 0.0, "Singleton raw statistics");
+    require_statistics_close(merge_statistics(empty, singleton), singleton, 0.0,
+                             "Left empty merge identity");
+    require_statistics_close(merge_statistics(singleton, empty), singleton, 0.0,
+                             "Right empty merge identity");
+    require_statistics_close(merge_statistics(empty, empty), empty, 0.0,
+                             "Merging empty batches");
+    require_invalid_argument([&] { finalize_monte_carlo(empty, 0.0, 1.0); },
+                             "Finalization rejects empty statistics");
+    require_invalid_argument([&] { finalize_monte_carlo(singleton, 0.0, 1.0); },
+                             "Finalization rejects singleton statistics");
+    const auto another = accumulate_monte_carlo(120.0, 0.0, 0.0, 1.0, 100.0, 8, 1, rng);
+    require_values_close(
+        price_values(finalize_monte_carlo(merge_statistics(singleton, another), 0.0, 1.0)),
+        {20.0, 0.0, 20.0, 0.0, 0.0, 0.0, 0.0, 0.0}, 1e-12,
+        "Two singleton batches can be finalized");
+    for (std::size_t paths : {0, 1}) {
+        require_invalid_argument([&] {
+            accumulate_monte_carlo(100.0, 0.2, 0.05, 1.0, 100.0, 0, paths, rng);
+        }, "Accumulation rejects zero time steps even for small batches");
+    }
+}
+
+void test_statistics_discounting()
+{
+    const MonteCarloStatistics statistics{
+        3, {6.0, 14.0}, {12.0, 56.0}, {18.0, 126.0}, {24.0, 224.0}
+    };
+    const auto before = statistics;
+    const double discount = std::exp(-0.05 * 2.0);
+    const double base_error = 1.0 / std::sqrt(3.0);
+    const std::array<double, 8> expected{
+        2.0, 4.0, 6.0, 8.0, base_error, 2.0 * base_error,
+        3.0 * base_error, 4.0 * base_error
+    };
+    auto discounted_expected = expected;
+    for (double& value : discounted_expected) {
+        value *= discount;
+    }
+    require_values_close(price_values(finalize_monte_carlo(statistics, 0.05, 2.0)),
+                         discounted_expected, 1e-12, "Prices and SE discounted exactly once");
+    require_values_close(price_values(finalize_monte_carlo(statistics, 0.0, 2.0)),
+                         expected, 1e-12, "Zero-rate finalization");
+    require_statistics_close(statistics, before, 0.0, "Finalization preserves raw statistics");
+}
+
+void test_single_threaded_regression()
+{
+    for (unsigned long long seed : {2023ULL, 8675309ULL}) {
+        for (std::size_t paths : {2, 257}) {
+            std::mt19937_64 reference_rng(seed);
+            std::mt19937_64 pricing_rng(seed);
+            std::array<std::vector<double>, 4> payoffs;
+            for (std::size_t index = 0; index < paths; ++index) {
+                const auto path = simulation_GBM(100.0, 0.2, 0.05, 17, 1.0, reference_rng);
+                payoffs[0].push_back(Asian_call_payoff(path, 100.0));
+                payoffs[1].push_back(Asian_put_payoff(path, 100.0));
+                payoffs[2].push_back(Lookback_call_payoff(path, 100.0));
+                payoffs[3].push_back(Lookback_put_payoff(path, 100.0));
+            }
+            std::array<double, 8> expected{};
+            for (std::size_t option = 0; option < payoffs.size(); ++option) {
+                const auto& samples = payoffs[option];
+                const double mean = std::accumulate(samples.begin(), samples.end(), 0.0) / paths;
+                double squared_deviations = 0.0;
+                for (double payoff : samples) {
+                    const double deviation = payoff - mean;
+                    squared_deviations += deviation * deviation;
+                }
+                const double sample_variance = squared_deviations / (paths - 1);
+                expected[option] = std::exp(-0.05) * mean;
+                expected[option + 4] = std::exp(-0.05) * std::sqrt(sample_variance / paths);
+            }
+            const auto actual = monte_carlo_pricing(100.0, 0.2, 0.05, 1.0, 100.0,
+                                                    17, paths, pricing_rng);
+            require_values_close(price_values(actual), expected, 1e-10,
+                                 "Legacy pricing agrees with a two-pass sample reference");
+            require(pricing_rng == reference_rng, "Legacy pricing preserves RNG consumption");
+        }
+    }
+    std::mt19937_64 rng(2023);
+    const auto initial_rng = rng;
+    for (std::size_t paths : {0, 1}) {
+        require_invalid_argument([&] {
+            monte_carlo_pricing(100.0, 0.2, 0.05, 1.0, 100.0, 17, paths, rng);
+        }, "Legacy pricing still rejects fewer than two samples");
+        require(rng == initial_rng, "Rejected legacy calls do not consume RNG");
+    }
+}
+
+void test_statistics_count_overflow()
+{
+    MonteCarloStatistics largest{};
+    largest.n = std::numeric_limits<std::size_t>::max();
+    require_statistics_close(merge_statistics(largest, MonteCarloStatistics{}),
+                             largest, 0.0, "Maximum count can merge with empty batch");
+    MonteCarloStatistics singleton{};
+    singleton.n = 1;
+    try {
+        merge_statistics(largest, singleton);
+    } catch (const std::overflow_error&) {
+        return;
+    }
+    throw std::runtime_error("Merge must reject sample-count overflow");
+}
+
 struct TestCase {
     std::string_view name;
     void (*run)();
@@ -253,7 +472,7 @@ struct TestCase {
 
 int main(int argc, char* argv[])
 {
-    const std::array<TestCase, 9> tests = {{
+    const std::array<TestCase, 16> tests = {{
         {"asian_call", test_asian_call},
         {"asian_put", test_asian_put},
         {"lookback_call", test_lookback_call},
@@ -262,7 +481,14 @@ int main(int argc, char* argv[])
         {"monte_carlo_properties", test_monte_carlo_properties},
         {"monte_carlo_zero_volatility", test_monte_carlo_zero_volatility},
         {"monte_carlo_one_step", test_monte_carlo_one_step},
-        {"invalid_inputs", test_invalid_inputs}
+        {"invalid_inputs", test_invalid_inputs},
+        {"statistics_raw", test_statistics_raw},
+        {"statistics_split_merge", test_statistics_split_merge},
+        {"statistics_unequal_batches", test_statistics_unequal_batches},
+        {"statistics_empty_singleton", test_statistics_empty_singleton},
+        {"statistics_discounting", test_statistics_discounting},
+        {"single_threaded_regression", test_single_threaded_regression},
+        {"statistics_count_overflow", test_statistics_count_overflow}
     }};
     if (argc > 2) {
         std::cerr << "Usage: test_pricing [test_name]\n";

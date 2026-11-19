@@ -6,111 +6,100 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <random>
 #include <stdexcept>
 #include <vector>
 
-OptionPrices monte_carlo_pricing(double s0,double sigma,double r,double T,double K,std::size_t steps,std::size_t M,std::mt19937_64& rng)
+MonteCarloStatistics accumulate_monte_carlo(double initial_price, double volatility,
+    double rate, double maturity, double strike, std::size_t steps,
+    std::size_t paths, std::mt19937_64& rng)
 {
-    if(M < 2 )// M !=1 because M-1 != 0 for variance_caculate
-        throw std::invalid_argument(" M must be at least 2 to calculate sample variance");
-    /*
-    double asian_sum = 0.0;
-    double lookback_sum = 0.0;
-    double asian_sq_sum = 0.0;//Add a sum-of-squares variable
-    double lookback_sq_sum = 0.0;
-    for(std::size_t i=0;i<M;i++)//get "SUM" of monte carlo
-    {
-        // Generate one GBM path
-        std::vector<double> path = simulation_GBM(s0,sigma,r,steps,T,rng);
-        // Calculate both payoffs
-        //asian_sum += Asian_call_payoff(path,K);
-        //lookback_sum += Lookback_call_payoff(path,K);
-       const double asian_payoff = Asian_call_payoff(path,K);
-       const double lookback_payoff = Lookback_call_payoff(path,K);
-       // To get Sum(pi)
-       asian_sum += asian_payoff;
-       lookback_sum += lookback_payoff;
-       // To get Sum(pi^2)
-       asian_sq_sum += asian_payoff * asian_payoff;
-       lookback_sq_sum += lookback_payoff * lookback_payoff;
+    if (steps == 0) {
+        throw std::invalid_argument("steps must be positive");
     }
-    //------4th--version------add standard error
 
-    const double Exponent = std::exp(-r*T);// // Discount factor
-    //mean
-    const double asian_mean = asian_sum / M;
-    const double lookback_mean = lookback_sum / M;
-    //variance
-    //Important Metho(std::max)d!!!! Handling Minor Negative Variances Caused by Floating-Point Errors
-    const double asian_variance = std::max(0.0,(asian_sq_sum - M * asian_mean * asian_mean) / (M -1));
-    const double lookback_variance = std::max(0.0,(lookback_sq_sum - M * lookback_mean * lookback_mean) / (M -1));
+    MonteCarloStatistics statistics{};
+    for (std::size_t index = 0; index < paths; ++index) {
+        const std::vector<double> path =
+            simulation_GBM(initial_price, volatility, rate, steps, maturity, rng);
+        const double asian_call = Asian_call_payoff(path, strike);
+        const double asian_put = Asian_put_payoff(path, strike);
+        const double lookback_call = Lookback_call_payoff(path, strike);
+        const double lookback_put = Lookback_put_payoff(path, strike);
 
-    OptionPrices result = {};// initialize all of its members to zero.
-    //---5th--version--update and add formular
-    //result.asian_call = Exponent * asian_sum / M;
-    //result.lookback_call = Exponent * lookback_sum / M;
-    result.asian_call = Exponent * asian_mean;//update
-    result.lookback_call = Exponent * lookback_mean;
-    result.asian_call_std_error = std::sqrt(asian_variance / M) * Exponent;
-    result.lookback_call_std_error = std::sqrt(lookback_variance / M) * Exponent;
+        statistics.asian_call.sum += asian_call;
+        statistics.asian_put.sum += asian_put;
+        statistics.lookback_call.sum += lookback_call;
+        statistics.lookback_put.sum += lookback_put;
+
+        statistics.asian_call.sum_sq += asian_call * asian_call;
+        statistics.asian_put.sum_sq += asian_put * asian_put;
+        statistics.lookback_call.sum_sq += lookback_call * lookback_call;
+        statistics.lookback_put.sum_sq += lookback_put * lookback_put;
+    }
+    statistics.n = paths;
+    return statistics;
+}
+
+MonteCarloStatistics merge_statistics(const MonteCarloStatistics& left,
+    const MonteCarloStatistics& right)
+{
+    if (right.n > std::numeric_limits<std::size_t>::max() - left.n) {
+        throw std::overflow_error("Merged sample count exceeds std::size_t");
+    }
+
+    MonteCarloStatistics result{};
+    result.n = left.n + right.n;
+    result.asian_call.sum = left.asian_call.sum + right.asian_call.sum;
+    result.asian_put.sum = left.asian_put.sum + right.asian_put.sum;
+    result.lookback_call.sum = left.lookback_call.sum + right.lookback_call.sum;
+    result.lookback_put.sum = left.lookback_put.sum + right.lookback_put.sum;
+    result.asian_call.sum_sq = left.asian_call.sum_sq + right.asian_call.sum_sq;
+    result.asian_put.sum_sq = left.asian_put.sum_sq + right.asian_put.sum_sq;
+    result.lookback_call.sum_sq = left.lookback_call.sum_sq + right.lookback_call.sum_sq;
+    result.lookback_put.sum_sq = left.lookback_put.sum_sq + right.lookback_put.sum_sq;
     return result;
-    */
-// update new version , add put before only has call
-// -------- Sum of Payoffs --------
-    double asian_call_sum = 0.0;
-    double asian_put_sum = 0.0;
-    double lookback_call_sum = 0.0;
-    double lookback_put_sum = 0.0;
-// -------- Sum of Squared Payoffs --------
-    double asian_call_sq_sum = 0.0;
-    double asian_put_sq_sum = 0.0;
-    double lookback_call_sq_sum = 0.0;
-    double lookback_put_sq_sum = 0.0;
-    for (std::size_t i = 0; i < M; ++i)
-    {
-    // Generate one GBM path
-        std::vector<double> path =
-        simulation_GBM(s0, sigma, r, steps, T, rng);
-    // Calculate four payoffs
-        const double AC = Asian_call_payoff(path, K);//Asian_Call
-        const double AP = Asian_put_payoff(path, K);//Put
-        const double LC = Lookback_call_payoff(path, K);
-        const double LP = Lookback_put_payoff(path, K);
+}
 
-    // -------- Sum of Payoffs --------
-        asian_call_sum += AC;
-        asian_put_sum += AP;
-        lookback_call_sum += LC;
-        lookback_put_sum += LP;
-    // -------- Sum of Squared Payoffs --------
-        asian_call_sq_sum += AC * AC;
-        asian_put_sq_sum += AP * AP;
-        lookback_call_sq_sum += LC * LC;
-        lookback_put_sq_sum += LP * LP;
+OptionPrices finalize_monte_carlo(const MonteCarloStatistics& statistics,
+    double rate, double maturity)
+{
+    if (statistics.n < 2) {
+        throw std::invalid_argument("At least two samples are required to calculate sample variance");
     }
-// -------- Mean Payoffs --------
-    const double asian_call_mean = asian_call_sum / M;
-    const double asian_put_mean = asian_put_sum / M;
-    const double lookback_call_mean = lookback_call_sum / M;
-    const double lookback_put_mean = lookback_put_sum / M;
-// -------- Sample Variances --------
-    const double asian_call_variance = std::max(0.0,(asian_call_sq_sum - M * asian_call_mean * asian_call_mean)/ (M - 1));
-    const double asian_put_variance = std::max(0.0,(asian_put_sq_sum - M * asian_put_mean * asian_put_mean)/ (M - 1));
-    const double lookback_call_variance = std::max(0.0,(lookback_call_sq_sum - M * lookback_call_mean * lookback_call_mean)/ (M - 1));
-    const double lookback_put_variance = std::max(0.0,(lookback_put_sq_sum - M * lookback_put_mean * lookback_put_mean)/ (M - 1));
-// -------- Discount Factor --------
-    const double discount = std::exp(-r * T);
-    OptionPrices result{};  
-// -------- Option Prices --------
+
+    const std::size_t samples = statistics.n;
+    const double asian_call_mean = statistics.asian_call.sum / samples;
+    const double asian_put_mean = statistics.asian_put.sum / samples;
+    const double lookback_call_mean = statistics.lookback_call.sum / samples;
+    const double lookback_put_mean = statistics.lookback_put.sum / samples;
+
+    const double asian_call_variance = std::max(0.0,
+        (statistics.asian_call.sum_sq - samples * asian_call_mean * asian_call_mean) / (samples - 1));
+    const double asian_put_variance = std::max(0.0,
+        (statistics.asian_put.sum_sq - samples * asian_put_mean * asian_put_mean) / (samples - 1));
+    const double lookback_call_variance = std::max(0.0,
+        (statistics.lookback_call.sum_sq - samples * lookback_call_mean * lookback_call_mean) / (samples - 1));
+    const double lookback_put_variance = std::max(0.0,
+        (statistics.lookback_put.sum_sq - samples * lookback_put_mean * lookback_put_mean) / (samples - 1));
+
+    const double discount = std::exp(-rate * maturity);
+    OptionPrices result{};
     result.asian_call = discount * asian_call_mean;
     result.asian_put = discount * asian_put_mean;
     result.lookback_call = discount * lookback_call_mean;
     result.lookback_put = discount * lookback_put_mean;
-// -------- Standard Errors --------
-    result.asian_call_std_error = discount * std::sqrt(asian_call_variance / M);
-    result.asian_put_std_error = discount * std::sqrt(asian_put_variance / M);
-    result.lookback_call_std_error = discount * std::sqrt(lookback_call_variance / M);
-    result.lookback_put_std_error = discount * std::sqrt(lookback_put_variance / M);
+    result.asian_call_std_error = discount * std::sqrt(asian_call_variance / samples);
+    result.asian_put_std_error = discount * std::sqrt(asian_put_variance / samples);
+    result.lookback_call_std_error = discount * std::sqrt(lookback_call_variance / samples);
+    result.lookback_put_std_error = discount * std::sqrt(lookback_put_variance / samples);
     return result;
+}
+
+OptionPrices monte_carlo_pricing(double s0, double sigma, double r, double T, double K, std::size_t steps, std::size_t M, std::mt19937_64& rng)
+{
+    if (M < 2) 
+        throw std::invalid_argument(" M must be at least 2 to calculate sample variance");
+    return finalize_monte_carlo(accumulate_monte_carlo(s0, sigma, r, T, K, steps, M, rng), r, T);
 }
