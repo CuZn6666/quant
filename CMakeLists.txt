@@ -56,3 +56,13 @@ if(BUILD_TESTING)
         set_tests_properties(${test_case} PROPERTIES TIMEOUT 30)
     endforeach()
 endif()
+
+# -------- Single-Threaded Benchmark --------
+
+add_executable(benchmark_single
+    benchmarks/benchmark.cpp
+)
+
+target_link_libraries(benchmark_single PRIVATE
+    quant_core
+)
