@@ -14,6 +14,11 @@ endif()
 find_package(Threads REQUIRED)
 
 option(QUANT_BUILD_VISUALIZATION "Build the quant executable with Matplot++ visualization" ON)
+option(QUANT_BUILD_BENCHMARK_PLOTS "Build the Matplot++ benchmark CSV plotter" OFF)
+
+if(QUANT_BUILD_VISUALIZATION OR QUANT_BUILD_BENCHMARK_PLOTS)
+    find_package(Matplot++ REQUIRED)
+endif()
 
 # Core library: GBM simulation, option payoffs, Monte Carlo pricing
 add_library(quant_core STATIC
@@ -31,8 +36,6 @@ target_include_directories(quant_core PUBLIC
 target_compile_features(quant_core PUBLIC cxx_std_11)
 
 if(QUANT_BUILD_VISUALIZATION)
-    find_package(Matplot++ REQUIRED)
-
     add_executable(quant
         src/main.cpp
         src/visualization.cpp
@@ -44,6 +47,20 @@ if(QUANT_BUILD_VISUALIZATION)
         Matplot++::matplot
     )
 endif()
+
+if(QUANT_BUILD_BENCHMARK_PLOTS)
+    find_program(GNUPLOT_EXECUTABLE NAMES gnuplot)
+    if(NOT GNUPLOT_EXECUTABLE)
+        message(FATAL_ERROR "Benchmark PNG export requires gnuplot on PATH")
+    endif()
+    add_executable(plot_benchmark benchmarks/plot_benchmark.cpp)
+    # Installed Matplot++ requires C++17; this target does not link quant_core.
+    target_compile_features(plot_benchmark PRIVATE cxx_std_17)
+    target_link_libraries(plot_benchmark PRIVATE Matplot++::matplot)
+endif()
+
+add_executable(pricing_demo examples/pricing_demo.cpp)
+target_link_libraries(pricing_demo PRIVATE quant_core)
 
 if(BUILD_TESTING)
     add_executable(test_pricing tests/test_pricing.cpp)

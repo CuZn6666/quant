@@ -12,7 +12,7 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-To build without the optional Matplot++ visualization dependency, add `-DQUANT_BUILD_VISUALIZATION=OFF` to the configure command. Only the visualization executable uses C++17; the core, tests and benchmarks use strict C++11. The validated Release build passed **24/24 tests**, with no compiler warnings. AddressSanitizer/UndefinedBehaviorSanitizer passed 24/24; ThreadSanitizer passed all 8 parallel groups.
+To build without the optional Matplot++ dependency, set `-DQUANT_BUILD_VISUALIZATION=OFF -DQUANT_BUILD_BENCHMARK_PLOTS=OFF`. Only the Matplot++ visualization/plotting executables use C++17; the core, tests, pricing demo and benchmarks use strict C++11. The validated Release build passed **24/24 tests**, with no compiler warnings. AddressSanitizer/UndefinedBehaviorSanitizer passed 24/24; ThreadSanitizer passed all 8 parallel groups.
 
 Run the benchmark (Release required):
 
@@ -43,3 +43,22 @@ Default workload: **1,000,000 total paths per configuration, 252 time steps, S0 
 For fixed parameters, seed, path count, active thread count and executable/toolchain, repeated results are exactly reproducible in the tests. Changing thread count changes random streams and floating-point grouping; cross-thread-count or cross-standard-library bitwise reproducibility is not promised. Independent-seed comparisons use six combined standard errors, not equality. Adjacent seeds retain the existing RNG strategy and do not formally guarantee independent streams. The raw sum-of-squares variance formula still has cancellation risk for nearly constant payoffs, and extreme finite inputs can overflow floating-point calculations.
 
 See the [implementation review, tests, sanitizer commands and limitations](docs/parallel_validation.md), including the earlier user-supplied **preliminary** results. Next, profile RNG, allocation and payoff traversal; then measure an experiment that reuses a path buffer per worker while preserving random-number consumption. No bottleneck has yet been isolated by profiling.
+
+### Presentation materials
+
+- [Demo commands for Baumgarten](docs/DEMO.md): build, serial/parallel prices, 24 tests and benchmark workflow.
+- [Complete benchmark table, environment and parameters](docs/benchmark_results.md).
+- [Short experimental analysis](docs/benchmark_analysis.md).
+- PNG figures: [Execution Time vs Threads](docs/figures/execution_time_vs_threads.png), [Speedup vs Threads](docs/figures/speedup_vs_threads.png), [Parallel Efficiency vs Threads](docs/figures/parallel_efficiency_vs_threads.png).
+- Archived data: [summary CSV](docs/benchmark_parallel_m3.csv) and [raw observations CSV](docs/benchmark_parallel_m3_raw.csv).
+
+Regenerate the figures from existing data with C++ Matplot++ (no benchmark rerun):
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DQUANT_BUILD_BENCHMARK_PLOTS=ON
+cmake --build build --target plot_benchmark pricing_demo
+./build/plot_benchmark docs/benchmark_parallel_m3.csv docs/figures
+./build/pricing_demo
+```
+
+Matplot++ and gnuplot are required only for plotting. The installed Matplot++ C++17 requirement is isolated from the C++11 pricing targets.
