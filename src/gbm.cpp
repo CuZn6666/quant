@@ -1,4 +1,5 @@
 #include "gbm.hpp"
+#include "gbm_validation.hpp"
 
 #include <cmath>
 #include <cstddef>
@@ -9,8 +10,7 @@
 std::vector<double> simulation_GBM(double s0,double sigma,double r,std::size_t steps,double T,std::mt19937_64 & rng)//rng =: Random Number Generator
 //Exact Discretization not Euler–Maruyama!
 {
-    if (steps == 0)
-    throw std::invalid_argument("steps must be positive");
+    validate_gbm(s0, sigma, r, steps, T);
     const double dt = T / steps;//deta t
     std::normal_distribution<double> normal(0.0,1.0);
     std::vector<double> S(steps+1);//t0----tn

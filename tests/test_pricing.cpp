@@ -16,7 +16,6 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
-#include <string_view>
 #include <vector>
 
 namespace {
@@ -464,7 +463,7 @@ void test_statistics_count_overflow()
 }
 
 struct TestCase {
-    std::string_view name;
+    std::string name;
     void (*run)();
 };
 

@@ -1,6 +1,7 @@
 #include "pricing.hpp"
 
 #include "gbm.hpp"
+#include "gbm_validation.hpp"
 #include "payoff.hpp"
 
 #include <algorithm>
@@ -11,12 +12,11 @@
 #include <stdexcept>
 #include <vector>
 
-MonteCarloStatistics accumulate_monte_carlo(double initial_price, double volatility,
-    double rate, double maturity, double strike, std::size_t steps,
-    std::size_t paths, std::mt19937_64& rng)
+MonteCarloStatistics accumulate_monte_carlo(double initial_price, double volatility,double rate, double maturity, double strike, std::size_t steps,std::size_t paths, std::mt19937_64& rng)
 {
-    if (steps == 0) {
-        throw std::invalid_argument("steps must be positive");
+    validate_gbm(initial_price, volatility, rate, steps, maturity);
+    if (!std::isfinite(strike) || strike < 0.0) {
+        throw std::invalid_argument("strike must be finite and nonnegative");
     }
 
     MonteCarloStatistics statistics{};
@@ -65,6 +65,9 @@ MonteCarloStatistics merge_statistics(const MonteCarloStatistics& left,
 OptionPrices finalize_monte_carlo(const MonteCarloStatistics& statistics,
     double rate, double maturity)
 {
+    if (!std::isfinite(rate) || !std::isfinite(maturity) || maturity < 0.0) {
+        throw std::invalid_argument("Finalization requires finite rate and T >= 0");
+    }
     if (statistics.n < 2) {
         throw std::invalid_argument("At least two samples are required to calculate sample variance");
     }
