@@ -568,3 +568,11 @@ Planned research directions are:
 5. **Explore CUDA/GPU acceleration:** study path-level parallelism, device RNGs and reductions as a future research direction; **no CUDA or GPU implementation exists in this repository**.
 
 Future optimization experiments should preserve the archived CSVs, use new output files, record their environment and compare against the same validated workload.
+
+### Scope of Mathematical Analysis
+
+This project is developed primarily from the perspective of a Quantitative Developer (QD or rather HFT), focusing on implementing mathematical models in efficient and reliable C++ code.
+
+Understanding the assumptions, parameters, and mathematical expressions behind these models is essential. However, the main objective is numerical implementation, validation, and performance evaluation rather than formal mathematical proofs.
+
+Therefore, this report presents the relevant mathematical foundations but does not include detailed theoretical derivations or rigorous proofs, as these are beyond the scope of this project.
