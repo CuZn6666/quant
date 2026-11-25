@@ -296,7 +296,7 @@ P=\min(P_{\mathrm{requested}},M),
 Here $`q`$ is the base quota and $`h`$ the number of remainder paths. Worker $`i`$, indexed from zero, receives
 
 ```math
-M_i=q+\mathbf{1}_{\{i<h\}},
+M_i=q+\mathbf{1}_{i<h},
 \qquad i=0,\ldots,P-1,
 \qquad \sum_{i=0}^{P-1}M_i=Pq+h=M.
 ```
